@@ -123,11 +123,28 @@ public protocol SyncDelegate: class {
 
     func perform(using context: NSManagedObjectContext) {
         do {
-            try Sync.changes(self.changes, inEntityNamed: self.entityName, predicate: self.predicate, parent: self.parent, parentRelationship: self.parentRelationship, inContext: context, operations: self.filterOperations, shouldContinueBlock: { () -> Bool in
-                return !self.isCancelled
-            }, objectJSONBlock: { objectJSON -> [String: Any] in
-                return self.delegate?.sync(self, willInsert: objectJSON, in: self.entityName, parent: self.parent) ?? objectJSON
-            })
+            if let parent = parent, parentRelationship == nil {
+                guard let entity = NSEntityDescription.entity(forEntityName: entityName, in: context) else { fatalError("Couldn't find entity named: \(entityName)") }
+                let relationships = entity.relationships(forDestination: parent.entity)
+                var predicate: NSPredicate?
+                let firstRelationship = relationships.first
+
+                if let firstRelationship = firstRelationship {
+                    predicate = NSPredicate(format: "%K = %@", firstRelationship.name, parent)
+                }
+
+                try Sync.changes(self.changes, inEntityNamed: self.entityName, predicate: predicate, parent: parent, parentRelationship: firstRelationship?.inverseRelationship, inContext: context, operations: self.filterOperations, shouldContinueBlock: { () -> Bool in
+                    return !self.isCancelled
+                }, objectJSONBlock: { objectJSON -> [String: Any] in
+                    return self.delegate?.sync(self, willInsert: objectJSON, in: self.entityName, parent: parent) ?? objectJSON
+                })
+            } else {
+                try Sync.changes(self.changes, inEntityNamed: self.entityName, predicate: self.predicate, parent: self.parent, parentRelationship: self.parentRelationship, inContext: context, operations: self.filterOperations, shouldContinueBlock: { () -> Bool in
+                    return !self.isCancelled
+                }, objectJSONBlock: { objectJSON -> [String: Any] in
+                    return self.delegate?.sync(self, willInsert: objectJSON, in: self.entityName, parent: self.parent) ?? objectJSON
+                })
+            }
         } catch let error as NSError {
             print("Failed syncing changes \(error)")
         }
@@ -146,7 +163,7 @@ public protocol SyncDelegate: class {
         updateCancelled(true)
     }
 
-    class func changes(_ changes: [[String: Any]], inEntityNamed entityName: String, predicate: NSPredicate?, parent: NSManagedObject?, parentRelationship: NSRelationshipDescription?, inContext context: NSManagedObjectContext, operations: Sync.OperationOptions, shouldContinueBlock: (() -> Bool)?, objectJSONBlock: ((_ objectJSON: [String: Any]) -> [String: Any])?) throws {
+    class func changes(_ changes: [[String: Any]], inEntityNamed entityName: String, predicate: NSPredicate?, parent: NSManagedObject?, parentRelationship: NSRelationshipDescription?, inContext context: NSManagedObjectContext, operations: Sync.OperationOptions, shouldSaveContext: Bool = true, shouldContinueBlock: (() -> Bool)?, objectJSONBlock: ((_ objectJSON: [String: Any]) -> [String: Any])?) throws {
         guard let entity = NSEntityDescription.entity(forEntityName: entityName, in: context) else { fatalError("Entity named \(entityName) not found.") }
 
         let localPrimaryKey = entity.sync_localPrimaryKey()
@@ -180,27 +197,13 @@ public protocol SyncDelegate: class {
 
             updatedObject.sync_fill(with: JSON, parent: parent, parentRelationship: parentRelationship, context: context, operations: operations, shouldContinueBlock: shouldContinueBlock, objectJSONBlock: objectJSONBlock)
         }
-        
-        // We have inserted, updated, and deleted objects. Now lets put them in the correct order if appropriate.
-        if let parentRelationship = parentRelationship, parentRelationship.isOrdered, let parent = parent, let objects = parent.value(forKey: parentRelationship.name) as? NSOrderedSet {
-            let changeIDs = (changes as NSArray).value(forKey: parentRelationship.destinationEntity!.sync_remotePrimaryKey()) as! NSArray
-            
-            for case let safeObject as NSManagedObject in objects.array {
-                let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey())!
-                let remoteIndex = changeIDs.index(of: currentID)
-                let relatedObjects = parent.mutableOrderedSetValue(forKey: parentRelationship.name)
-                
-                let currentIndex = relatedObjects.index(of: safeObject)
-                if currentIndex != remoteIndex && currentIndex != NSNotFound && currentIndex < relatedObjects.count && remoteIndex < relatedObjects.count {
-                    relatedObjects.moveObjects(at: IndexSet(integer: currentIndex), to: remoteIndex)
-                }
-            }
-        }
 
         if context.hasChanges {
             let shouldContinue = shouldContinueBlock?() ?? true
             if shouldContinue {
-                try context.save()
+                if shouldSaveContext {
+                    try context.save()
+                }
             } else {
                 context.reset()
             }
