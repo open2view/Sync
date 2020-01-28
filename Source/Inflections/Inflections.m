@@ -23,11 +23,11 @@ typedef void (^InflectionsStringStorageBlock)(void);
 
 - (instancetype)init {
     self = [super init];
-	if (self) {
-		_serialQueue = dispatch_queue_create("com.syncdb.NSString_Inflections.serialQueue", DISPATCH_QUEUE_SERIAL);
-	}
+    if (self) {
+        _serialQueue = dispatch_queue_create("com.syncdb.NSString_Inflections.serialQueue", DISPATCH_QUEUE_SERIAL);
+    }
 
-	return self;
+    return self;
 
 }
 
@@ -48,7 +48,7 @@ typedef void (^InflectionsStringStorageBlock)(void);
 }
 
 - (void)performOnDictionary:(InflectionsStringStorageBlock)block {
-	dispatch_sync(_serialQueue, block);
+    dispatch_sync(_serialQueue, block);
 
 }
 
@@ -67,12 +67,12 @@ typedef void (^InflectionsStringStorageBlock)(void);
 #pragma mark - Private methods
 
 - (nonnull NSString *)hyp_snakeCase {
-	InflectionsStringStorage *const stringStorage = [InflectionsStringStorage sharedInstance];
-	__block NSString *storedResult = nil;
+    InflectionsStringStorage *const stringStorage = [InflectionsStringStorage sharedInstance];
+    __block NSString *storedResult = nil;
 
-	[stringStorage performOnDictionary:^{
-		storedResult = [[stringStorage snakeCaseStorage] objectForKey:self];
-	}];
+    [stringStorage performOnDictionary:^{
+        storedResult = [[stringStorage snakeCaseStorage] objectForKey:self];
+    }];
 
     if (storedResult) {
         return storedResult;
@@ -80,21 +80,21 @@ typedef void (^InflectionsStringStorageBlock)(void);
         NSString *firstLetterLowercase = [self hyp_lowerCaseFirstLetter];
         NSString *result = [firstLetterLowercase hyp_replaceIdentifierWithString:@"_"];
 
-		[stringStorage performOnDictionary:^{
-			[stringStorage snakeCaseStorage][self] = result;
-		}];
+        [stringStorage performOnDictionary:^{
+            [stringStorage snakeCaseStorage][self] = result;
+        }];
 
         return result;
     }
 }
 
 - (nullable NSString *)hyp_camelCase {
-	InflectionsStringStorage *const stringStorage = [InflectionsStringStorage sharedInstance];
-	__block NSString *storedResult = nil;
+    InflectionsStringStorage *const stringStorage = [InflectionsStringStorage sharedInstance];
+    __block NSString *storedResult = nil;
 
-	[stringStorage performOnDictionary:^{
-		storedResult = [[stringStorage camelCaseStorage] objectForKey:self];
-	}];
+    [stringStorage performOnDictionary:^{
+        storedResult = [[stringStorage camelCaseStorage] objectForKey:self];
+    }];
 
     if (storedResult) {
         return storedResult;

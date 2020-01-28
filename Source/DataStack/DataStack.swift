@@ -29,8 +29,6 @@ import CoreData
 
     private let backgroundContextName = "DataStack.backgroundContextName"
 
-    private let disposableContextName = "DataStack.disposableContextName"
-
     /**
      The context for the main queue. Please do not use this to mutate data, use `performInNewBackgroundContext`
      instead.
@@ -209,7 +207,6 @@ import CoreData
      */
     @objc public func newDisposableMainContext() -> NSManagedObjectContext {
         let context = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
-        context.name = disposableContextName
         context.persistentStoreCoordinator = self.disposablePersistentStoreCoordinator
         context.undoManager = nil
 
@@ -372,12 +369,9 @@ import CoreData
 
     // Can't be private, has to be internal in order to be used as a selector.
     @objc func newDisposableMainContextWillSave(_ notification: Notification) {
-        let context = notification.object as? NSManagedObjectContext
-        guard context?.name == disposableContextName else {
-            return
+        if let context = notification.object as? NSManagedObjectContext {
+            context.reset()
         }
-
-        context?.reset()
     }
 
     // Can't be private, has to be internal in order to be used as a selector.
@@ -436,7 +430,7 @@ extension NSPersistentStoreCoordinator {
                 }
             }
 
-            let options = [NSMigratePersistentStoresAutomaticallyOption: true, NSInferMappingModelAutomaticallyOption: true, NSSQLitePragmasOption: ["journal_mode": "DELETE"]] as [AnyHashable: Any]
+            let options = [NSMigratePersistentStoresAutomaticallyOption: true, NSInferMappingModelAutomaticallyOption: true, NSSQLitePragmasOption: ["journal_mode": "DELETE"]] as [AnyHashable : Any]
             do {
                 try self.addPersistentStore(ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL, options: options)
             } catch {
@@ -501,13 +495,13 @@ extension FileManager {
     /// The directory URL for the sqlite file.
     public static var sqliteDirectoryURL: URL {
         #if os(tvOS)
-            return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).last!
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).last!
         #else
-            if TestCheck.isTesting {
-                return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).last!
-            } else {
-                return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).last!
-            }
+        if TestCheck.isTesting {
+            return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).last!
+        } else {
+            return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).last!
+        }
         #endif
     }
 }
