@@ -75,11 +75,11 @@ class DataFilter: NSObject {
         }
 
         if operations.contains(.update) {
-            let intersection = NSMutableOrderedSet(array:remotePrimaryKeysWithoutNils)
-            intersection.intersect(NSOrderedSet(array: localPrimaryKeys))
-            let updatedObjectIDs = intersection.array
+            var intersection = Set(remotePrimaryKeysWithoutNils)
+            intersection.formIntersection(Set(localPrimaryKeys))
+            let updatedObjectIDs = Array(intersection)
 
-            for case let fetchedID as NSObject in updatedObjectIDs {
+            for fetchedID in updatedObjectIDs {
                 let JSON = remotePrimaryKeysAndChanges[fetchedID]!
                 let objectID = primaryKeysAndObjectIDs[fetchedID]!
                 let object = context.object(with: objectID)
