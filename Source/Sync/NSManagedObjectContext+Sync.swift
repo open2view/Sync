@@ -47,8 +47,13 @@ public extension NSManagedObjectContext {
             do {
                 let objects = try self.fetch(request)
                 for object in objects {
-                    let fetchedID = object[attributeName] as! NSObject
-                    let objectID = object["objectID"] as! NSManagedObjectID
+                    guard
+                        let fetchedID = object[attributeName] as? NSObject,
+                        let objectID = object["objectID"] as? NSManagedObjectID
+                    else {
+                        print("Primary ID \"\(attributeName)\" of object \"\(entityName)\" not found in dictionary. \(object).")
+                        continue
+                    }
 
                     if let _ = result[fetchedID] {
                         self.delete(self.object(with: objectID))
