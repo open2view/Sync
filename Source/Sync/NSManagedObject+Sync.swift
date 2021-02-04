@@ -133,7 +133,11 @@ extension NSManagedObject {
             let fetchedObjects = try? managedObjectContext.fetch(request) as? [NSManagedObject] ?? [NSManagedObject]()
             guard let objects = fetchedObjects else { return }
             for safeObject in objects {
-                let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey())!
+                guard let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey()) else {
+                    print("\(safeObject.entity.name!) \(safeObject) has a nil value for primary key \(safeObject.entity.sync_localPrimaryKey()).")
+                    continue
+                }
+
                 for inserted in insertedItems {
                     if (currentID as AnyObject).isEqual(inserted) {
                         if relationship.isOrdered {
@@ -173,7 +177,8 @@ extension NSManagedObject {
 
             if relationship.isOrdered {
                 for safeObject in objects {
-                    let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey())!
+                    guard let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey()) else { continue }
+
                     let remoteIndex = remoteItems.index(of: currentID)
                     let relatedObjects = self.mutableOrderedSetValue(forKey: relationship.name)
 
