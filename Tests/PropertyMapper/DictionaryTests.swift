@@ -75,7 +75,7 @@ class DictionaryTests: XCTestCase {
         formatter.timeZone = TimeZone(identifier: "GMT")
 
         let result = user.hyp_dictionary(with: formatter, using: .camelCase)
-        print(result)
+        debugPrint(result)
         XCTAssertEqual(compared as NSDictionary, result as NSDictionary)
 
         dataStack.drop()
@@ -111,7 +111,7 @@ class DictionaryTests: XCTestCase {
             ] as [String : Any]
 
         let result = user.hyp_dictionary(using: .snakeCase, andRelationshipType: .array)
-        print(result)
+        debugPrint(result)
         XCTAssertEqual(compared as NSDictionary, result as NSDictionary)
 
         dataStack.drop()
@@ -145,7 +145,7 @@ class DictionaryTests: XCTestCase {
             ] as [String : Any]
 
         let result = user.hyp_dictionary(using: .camelCase, andRelationshipType: .array)
-        print(result)
+        debugPrint(result)
         XCTAssertEqual(compared as NSDictionary, result as NSDictionary)
 
         dataStack.drop()
@@ -179,7 +179,7 @@ class DictionaryTests: XCTestCase {
             ] as [String : Any]
 
         let result = user.hyp_dictionary(using: .snakeCase, andRelationshipType: .nested)
-        print(result)
+        debugPrint(result)
         XCTAssertEqual(compared as NSDictionary, result as NSDictionary)
 
         dataStack.drop()
@@ -213,7 +213,7 @@ class DictionaryTests: XCTestCase {
             ] as [String : Any]
 
         let result = user.hyp_dictionary(using: .camelCase, andRelationshipType: .nested)
-        print(result)
+        debugPrint(result)
         XCTAssertEqual(compared as NSDictionary, result as NSDictionary)
         
         dataStack.drop()
@@ -228,7 +228,7 @@ class DictionaryTests: XCTestCase {
         let compared = ["description": "test"] as [String : Any]
 
         let result = user.hyp_dictionary(using: .camelCase)
-        print(result)
+        debugPrint(result)
         XCTAssertEqual(compared as NSDictionary, result as NSDictionary)
 
         dataStack.drop()

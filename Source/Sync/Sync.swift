@@ -146,7 +146,7 @@ public protocol SyncDelegate: class {
                 })
             }
         } catch let error as NSError {
-            print("Failed syncing changes \(error)")
+            debugPrint("Failed syncing changes \(error)")
         }
 
         self.updateExecuting(false)

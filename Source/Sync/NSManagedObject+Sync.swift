@@ -134,7 +134,7 @@ extension NSManagedObject {
             guard let objects = fetchedObjects else { return }
             for safeObject in objects {
                 guard let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey()) else {
-                    print("\(safeObject.entity.name!) \(safeObject) has a nil value for primary key \(safeObject.entity.sync_localPrimaryKey()).")
+                    debugPrint("\(safeObject.entity.name!) \(safeObject) has a nil value for primary key \(safeObject.entity.sync_localPrimaryKey()).")
                     continue
                 }
 
@@ -387,7 +387,7 @@ extension NSManagedObject {
                 setValue(safeObject, forKey: relationship.name)
             }
         } else {
-            print("Trying to sync a \(self.entity.name!) \(self) with a \(destinationEntityName) with ID \(localPrimaryKey), didn't work because \(destinationEntityName) doesn't exist. Make sure the \(destinationEntityName) exists before proceeding.")
+            debugPrint("Trying to sync a \(self.entity.name!) \(self) with a \(destinationEntityName) with ID \(localPrimaryKey), didn't work because \(destinationEntityName) doesn't exist. Make sure the \(destinationEntityName) exists before proceeding.")
         }
     }
 

@@ -51,7 +51,7 @@ public extension NSManagedObjectContext {
                         let fetchedID = object[attributeName] as? NSObject,
                         let objectID = object["objectID"] as? NSManagedObjectID
                     else {
-                        print("Primary ID \"\(attributeName)\" of object \"\(entityName)\" not found in dictionary. \(object).")
+                        debugPrint("Primary ID \"\(attributeName)\" of object \"\(entityName)\" not found in dictionary. \(object).")
                         continue
                     }
 
@@ -62,7 +62,7 @@ public extension NSManagedObjectContext {
                     }
                 }
             } catch let error as NSError {
-                print("error: \(error)")
+                debugPrint("error: \(error)")
             }
         }
 

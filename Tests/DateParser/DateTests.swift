@@ -54,8 +54,8 @@ class DateTests: XCTestCase {
     func testDateG() {
         let date = Date.dateWithHourAndTimeZoneString(dateString: "2015-06-23T19:04:19.911Z")
         let resultDate = NSDate(fromDateString: "2015-06-23T19:04:19.911Z")! as Date
-        print(date.timeIntervalSince1970)
-        print(resultDate.timeIntervalSince1970)
+        debugPrint(date.timeIntervalSince1970)
+        debugPrint(resultDate.timeIntervalSince1970)
         date.prettyPrint()
 
         XCTAssertNotNil(resultDate)
@@ -178,6 +178,6 @@ extension Date {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         let string = formatter.string(from: self)
-        print(string)
+        debugPrint(string)
     }
 }
