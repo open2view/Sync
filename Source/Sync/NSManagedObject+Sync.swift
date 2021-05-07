@@ -103,7 +103,7 @@ extension NSManagedObject {
      - parameter localPrimaryKey: The localPrimaryKey of the relationship to be synced, usually an array of strings or numbers.
      */
     func sync_toManyRelationshipUsingIDsInsteadOfDictionary(_ relationship: NSRelationshipDescription, localPrimaryKey: Any) {
-        guard let managedObjectContext = managedObjectContext else { fatalError("managedObjectContext not found") }
+        guard let managedObjectContext = managedObjectContext else { debugPrint("managedObjectContext not found, maybe object was deleted"); return }
         guard let destinationEntity = relationship.destinationEntity else { fatalError("destinationEntity not found in relationship: \(relationship)") }
         guard let destinationEntityName = destinationEntity.name else { fatalError("entityName not found in entity: \(destinationEntity)") }
         if localPrimaryKey is NSNull {
@@ -374,7 +374,7 @@ extension NSManagedObject {
      - parameter dataStack: The DataStack instance.
      */
     func sync_toOneRelationshipUsingIDInsteadOfDictionary(_ relationship: NSRelationshipDescription, localPrimaryKey: Any) {
-        guard let managedObjectContext = self.managedObjectContext else { fatalError("managedObjectContext not found") }
+        guard let managedObjectContext = self.managedObjectContext else { debugPrint("managedObjectContext not found, maybe object was deleted"); return }
         guard let destinationEntity = relationship.destinationEntity else { fatalError("destinationEntity not found in relationship: \(relationship)") }
         guard let destinationEntityName = destinationEntity.name else { fatalError("entityName not found in entity: \(destinationEntity)") }
         if localPrimaryKey is NSNull {

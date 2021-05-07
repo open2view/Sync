@@ -362,7 +362,7 @@ import CoreData
     @objc func mainContextDidSave(_ notification: Notification) {
         self.saveMainThread { error in
             if let error = error {
-                fatalError("Failed to save objects in main thread: \(error)")
+                debugPrint("Failed to save objects in main thread: \(error)")
             }
         }
     }
