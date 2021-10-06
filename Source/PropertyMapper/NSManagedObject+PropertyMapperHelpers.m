@@ -45,13 +45,29 @@ static NSString * const PropertyMapperDestroyKey = @"destroy";
 - (NSAttributeDescription *)attributeDescriptionForRemoteKey:(NSString *)remoteKey
                                          usingInflectionType:(SyncPropertyMapperInflectionType)inflectionType {
     __block NSAttributeDescription *foundAttributeDescription;
+    __block NSString *localKey = [remoteKey hyp_camelCase];
+
+    BOOL isReservedKey = ([[NSManagedObject reservedAttributes] containsObject:remoteKey]);
+    if (isReservedKey) {
+        NSString *prefixedRemoteKey = [self prefixedAttribute:remoteKey usingInflectionType:inflectionType];
+        localKey = [prefixedRemoteKey hyp_camelCase];
+    }
 
     [self.entity.properties enumerateObjectsUsingBlock:^(id propertyDescription, NSUInteger idx, BOOL *stop) {
         if ([propertyDescription isKindOfClass:[NSAttributeDescription class]]) {
             NSAttributeDescription *attributeDescription = (NSAttributeDescription *)propertyDescription;
 
-            NSString *customRemoteKey = [self.entity.propertiesByName[attributeDescription.name] customKey];
+            if ([attributeDescription.name isEqualToString:remoteKey]) {
+                foundAttributeDescription = attributeDescription;
+                *stop = YES;
+            }
 
+            if ([attributeDescription.name isEqualToString:localKey]) {
+                foundAttributeDescription = attributeDescription;
+                *stop = YES;
+            }
+
+            NSString *customRemoteKey = [self.entity.propertiesByName[attributeDescription.name] customKey];
             BOOL currentAttributeHasTheSameRemoteKey = (customRemoteKey.length > 0 && [customRemoteKey isEqualToString:remoteKey]);
             if (currentAttributeHasTheSameRemoteKey) {
                 foundAttributeDescription = attributeDescription;
@@ -61,23 +77,6 @@ static NSString * const PropertyMapperDestroyKey = @"destroy";
             NSString *customRootRemoteKey = [[customRemoteKey componentsSeparatedByString:@"."] firstObject];
             BOOL currentAttributeHasTheSameRootRemoteKey = (customRootRemoteKey.length > 0 && [customRootRemoteKey isEqualToString:remoteKey]);
             if (currentAttributeHasTheSameRootRemoteKey) {
-                foundAttributeDescription = attributeDescription;
-                *stop = YES;
-            }
-            
-            if ([attributeDescription.name isEqualToString:remoteKey]) {
-                foundAttributeDescription = attributeDescription;
-                *stop = YES;
-            }
-
-            NSString *localKey = [remoteKey hyp_camelCase];
-            BOOL isReservedKey = ([[NSManagedObject reservedAttributes] containsObject:remoteKey]);
-            if (isReservedKey) {
-                NSString *prefixedRemoteKey = [self prefixedAttribute:remoteKey usingInflectionType:inflectionType];
-                localKey = [prefixedRemoteKey hyp_camelCase];
-            }
-
-            if ([attributeDescription.name isEqualToString:localKey]) {
                 foundAttributeDescription = attributeDescription;
                 *stop = YES;
             }
