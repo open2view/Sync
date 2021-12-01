@@ -126,12 +126,18 @@ public protocol SyncDelegate: class {
             if let parent = parent, parentRelationship == nil {
                 guard let entity = NSEntityDescription.entity(forEntityName: entityName, in: context) else { fatalError("Couldn't find entity named: \(entityName)") }
                 let relationships = entity.relationships(forDestination: parent.entity)
-                var predicate: NSPredicate?
                 let firstRelationship = relationships.first
+                var predicates = [NSPredicate]()
+
+                if let predicate = self.predicate {
+                    predicates.append(predicate)
+                }
 
                 if let firstRelationship = firstRelationship {
-                    predicate = NSPredicate(format: "%K = %@", firstRelationship.name, parent)
+                    predicates.append(NSPredicate(format: "%K = %@", firstRelationship.name, parent))
                 }
+
+                let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
 
                 try Sync.changes(self.changes, inEntityNamed: self.entityName, predicate: predicate, parent: parent, parentRelationship: firstRelationship?.inverseRelationship, inContext: context, operations: self.filterOperations, shouldContinueBlock: { () -> Bool in
                     return !self.isCancelled
