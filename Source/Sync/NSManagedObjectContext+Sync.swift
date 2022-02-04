@@ -20,7 +20,8 @@ public extension NSManagedObjectContext {
                 let objects = try fetch(request)
                 result = objects.first as? NSManagedObject
             } catch {
-                fatalError("Failed to fetch request for entityName: \(entityName), predicate: \(String(describing: request.predicate))")
+                debugPrint("Failed to fetch request for entityName: \(entityName), predicate: \(String(describing: request.predicate))")
+                return nil
             }
         } else if let parentRelationshipName = parentRelationshipName {
             // More info: https://github.com/3lvis/Sync/pull/72
