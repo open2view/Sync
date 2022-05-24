@@ -387,7 +387,7 @@ extension NSManagedObject {
                 setValue(safeObject, forKey: relationship.name)
             }
         } else {
-            debugPrint("Trying to sync a \(self.entity.name!) \(self) with a \(destinationEntityName) with ID \(localPrimaryKey), didn't work because \(destinationEntityName) doesn't exist. Make sure the \(destinationEntityName) exists before proceeding.")
+            print("Trying to sync a \(self.entity.name!) with a \(destinationEntityName) with ID \(localPrimaryKey), didn't work because \(destinationEntityName) doesn't exist. Make sure the \(destinationEntityName) exists before proceeding.")
         }
     }
 

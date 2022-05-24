@@ -11,11 +11,6 @@
                      dateFormatter:(NSDateFormatter *)dateFormatter
                   relationshipType:(SyncPropertyMapperRelationshipType)relationshipType;
 
-- (NSAttributeDescription *)attributeDescriptionForRemoteKey:(NSString *)remoteKey;
-
-- (NSAttributeDescription *)attributeDescriptionForRemoteKey:(NSString *)remoteKey
-                                         usingInflectionType:(SyncPropertyMapperInflectionType)inflectionType;
-
 - (NSArray *)attributeDescriptionsForRemoteKeyPath:(NSString *)key;
 
 - (id)valueForAttributeDescription:(id)attributeDescription

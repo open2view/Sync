@@ -16,35 +16,53 @@ static NSString * const PropertyMapperNestedAttributesKey = @"attributes";
 }
 
 - (void)hyp_fillWithDictionary:(NSDictionary<NSString *, id> *)dictionary {
-    for (__strong NSString *key in dictionary) {
-        id value = [dictionary objectForKey:key];
+  id remoteToLocalKeyMap = [[NSMutableDictionary<NSString *, NSString *> alloc] init];
 
-        NSAttributeDescription *attributeDescription = [self attributeDescriptionForRemoteKey:key];
-        if (attributeDescription) {
-            BOOL valueExists = (value && ![value isKindOfClass:[NSNull class]]);
-            if (valueExists && [value isKindOfClass:[NSDictionary class]] && attributeDescription.attributeType != NSBinaryDataAttributeType) {
-                NSString *remoteKey = [self remoteKeyForAttributeDescription:attributeDescription
-                                                              inflectionType:SyncPropertyMapperInflectionTypeSnakeCase];
-                BOOL hasCustomKeyPath = remoteKey && [remoteKey rangeOfString:@"."].location != NSNotFound;
-                if (hasCustomKeyPath) {
-                    NSArray *keyPathAttributeDescriptions = [self attributeDescriptionsForRemoteKeyPath:remoteKey];
-                    for (NSAttributeDescription *keyPathAttributeDescription in keyPathAttributeDescriptions) {
-                        NSString *remoteKey = [self remoteKeyForAttributeDescription:keyPathAttributeDescription
-                                                                      inflectionType:SyncPropertyMapperInflectionTypeSnakeCase];
-                        NSString *localKey = keyPathAttributeDescription.name;
-                        [self hyp_setDictionaryValue:[dictionary valueForKeyPath:remoteKey]
-                                              forKey:localKey
-                                attributeDescription:keyPathAttributeDescription];
-                    }
-                }
-            } else {
-                NSString *localKey = attributeDescription.name;
-                [self hyp_setDictionaryValue:value
-                                      forKey:localKey
-                        attributeDescription:attributeDescription];
-            }
-        }
+  [self.entity.properties enumerateObjectsUsingBlock:^(id propertyDescription, NSUInteger idx, BOOL *stop) {
+    if ([propertyDescription isKindOfClass:[NSAttributeDescription class]]) {
+      NSAttributeDescription *attributeDescription = (NSAttributeDescription *)propertyDescription;
+
+      NSString *customRemoteKey = [self.entity.propertiesByName[attributeDescription.name] customKey];
+      if (customRemoteKey.length > 0) {
+        [remoteToLocalKeyMap setObject:attributeDescription.name forKey:customRemoteKey];
+        return;
+      }
+
+      NSString *defaultRemoteKey = [attributeDescription.name hyp_snakeCase];
+      [remoteToLocalKeyMap setObject:attributeDescription.name forKey:defaultRemoteKey];
     }
+  }];
+
+  for (__strong NSString *key in dictionary) {
+    id value = [dictionary objectForKey:key];
+
+    NSString *localKey = remoteToLocalKeyMap[key];
+    NSAttributeDescription *attributeDescription = [self.entity.propertiesByName objectForKey:localKey];
+    if (attributeDescription) {
+      BOOL valueExists = (value && ![value isKindOfClass:[NSNull class]]);
+      if (valueExists && [value isKindOfClass:[NSDictionary class]] && attributeDescription.attributeType != NSBinaryDataAttributeType) {
+        NSString *remoteKey = [self remoteKeyForAttributeDescription:attributeDescription
+                                                      inflectionType:SyncPropertyMapperInflectionTypeSnakeCase];
+        BOOL hasCustomKeyPath = remoteKey && [remoteKey rangeOfString:@"."].location != NSNotFound;
+        if (hasCustomKeyPath) {
+          NSArray *keyPathAttributeDescriptions = [self attributeDescriptionsForRemoteKeyPath:remoteKey];
+          for (NSAttributeDescription *keyPathAttributeDescription in keyPathAttributeDescriptions) {
+            NSString *remoteKey = [self remoteKeyForAttributeDescription:keyPathAttributeDescription
+                                                          inflectionType:SyncPropertyMapperInflectionTypeSnakeCase];
+            NSString *localKey = keyPathAttributeDescription.name;
+            [self hyp_setDictionaryValue:[dictionary valueForKeyPath:remoteKey]
+                                  forKey:localKey
+                    attributeDescription:keyPathAttributeDescription];
+          }
+        }
+      } else {
+        NSString *localKey = attributeDescription.name;
+        [self hyp_setDictionaryValue:value
+                              forKey:localKey
+                attributeDescription:attributeDescription];
+      }
+    }
+  }
 }
 
 - (void)hyp_setDictionaryValue:(id)value forKey:(NSString *)key
