@@ -11,6 +11,13 @@
                      dateFormatter:(NSDateFormatter *)dateFormatter
                   relationshipType:(SyncPropertyMapperRelationshipType)relationshipType;
 
+- (NSAttributeDescription *)attributeDescriptionForRemoteKey:(NSString *)remoteKey
+                                      customKeyToLocalKeyMap:(NSMutableDictionary<NSString *, NSString *> *)customKeyToLocalKeyMap;
+
+- (NSAttributeDescription *)attributeDescriptionForRemoteKey:(NSString *)remoteKey
+                                         usingInflectionType:(SyncPropertyMapperInflectionType)inflectionType
+                                      customKeyToLocalKeyMap:(NSMutableDictionary<NSString *, NSString *> *)customKeyToLocalKeyMap;
+
 - (NSArray *)attributeDescriptionsForRemoteKeyPath:(NSString *)key;
 
 - (id)valueForAttributeDescription:(id)attributeDescription

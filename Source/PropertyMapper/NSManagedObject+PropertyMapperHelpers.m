@@ -38,13 +38,63 @@ static NSString * const PropertyMapperDestroyKey = @"destroy";
     return value;
 }
 
+- (NSAttributeDescription *)attributeDescriptionForRemoteKey:(NSString *)remoteKey
+                                      customKeyToLocalKeyMap:(NSMutableDictionary<NSString *, NSString *> *)customKeyToLocalKeyMap {
+    return [self attributeDescriptionForRemoteKey:remoteKey usingInflectionType:SyncPropertyMapperInflectionTypeSnakeCase customKeyToLocalKeyMap:customKeyToLocalKeyMap];
+}
+
+- (NSAttributeDescription *)attributeDescriptionForRemoteKey:(NSString *)remoteKey
+                                         usingInflectionType:(SyncPropertyMapperInflectionType)inflectionType
+                                      customKeyToLocalKeyMap:(NSMutableDictionary<NSString *, NSString *> *)customKeyToLocalKeyMap {
+    id propertiesByName = self.entity.propertiesByName;
+
+    id remoteKeyPropertyDescription = [propertiesByName objectForKey:remoteKey];
+    if ([remoteKeyPropertyDescription isKindOfClass:[NSAttributeDescription class]]) {
+      return (NSAttributeDescription *)remoteKeyPropertyDescription;
+    }
+
+    __block NSString *localKey = [remoteKey hyp_camelCase];
+
+    BOOL isReservedKey = ([[NSManagedObject reservedAttributes] containsObject:remoteKey]);
+    if (isReservedKey) {
+        NSString *prefixedRemoteKey = [self prefixedAttribute:remoteKey usingInflectionType:inflectionType];
+        localKey = [prefixedRemoteKey hyp_camelCase];
+    }
+
+    id localKeyPropertyDescription = [propertiesByName objectForKey:localKey];
+    if ([localKeyPropertyDescription isKindOfClass:[NSAttributeDescription class]]) {
+      return (NSAttributeDescription *)localKeyPropertyDescription;
+    }
+
+    id customKey = [customKeyToLocalKeyMap objectForKey:remoteKey];
+    id customKeyPropertyDescription = [propertiesByName objectForKey:customKey];
+    if ([customKeyPropertyDescription isKindOfClass:[NSAttributeDescription class]]) {
+      return (NSAttributeDescription *)customKeyPropertyDescription;
+    }
+
+    if ([remoteKey isEqualToString:SyncDefaultRemotePrimaryKey] &&
+        ([localKey isEqualToString:SyncDefaultLocalPrimaryKey] || [localKey isEqualToString:SyncDefaultLocalCompatiblePrimaryKey])) {
+      id primaryKeyPropertyDescription = [propertiesByName objectForKey:SyncDefaultLocalPrimaryKey];
+      if ([primaryKeyPropertyDescription isKindOfClass:[NSAttributeDescription class]]) {
+        return (NSAttributeDescription *)primaryKeyPropertyDescription;
+      }
+
+      id compatiblePrimaryKeyPropertyDescription = [propertiesByName objectForKey:SyncDefaultLocalCompatiblePrimaryKey];
+      if ([compatiblePrimaryKeyPropertyDescription isKindOfClass:[NSAttributeDescription class]]) {
+        return (NSAttributeDescription *)compatiblePrimaryKeyPropertyDescription;
+      }
+    }
+
+    return nil;
+}
+
 - (NSArray *)attributeDescriptionsForRemoteKeyPath:(NSString *)remoteKey {
     __block NSMutableArray *foundAttributeDescriptions = [NSMutableArray array];
-    
+
     [self.entity.properties enumerateObjectsUsingBlock:^(id propertyDescription, NSUInteger idx, BOOL *stop) {
         if ([propertyDescription isKindOfClass:[NSAttributeDescription class]]) {
             NSAttributeDescription *attributeDescription = (NSAttributeDescription *)propertyDescription;
-            
+
             NSString *customRemoteKeyPath = self.entity.propertiesByName[attributeDescription.name].customKey;
             NSString *customRootRemoteKey = [[customRemoteKeyPath componentsSeparatedByString:@"."] firstObject];
             NSString *rootRemoteKey = [[remoteKey componentsSeparatedByString:@"."] firstObject];
@@ -54,7 +104,7 @@ static NSString * const PropertyMapperDestroyKey = @"destroy";
             }
         }
     }];
-    
+
     return foundAttributeDescriptions;
 }
 
@@ -142,7 +192,7 @@ static NSString * const PropertyMapperDestroyKey = @"destroy";
 
     BOOL numberValueAndDateAttribute    = ([remoteValue isKindOfClass:[NSNumber class]] &&
                                           attributedClass == [NSDate class]);
-    
+
     BOOL stringValueAndUUIDAttribute    = ([remoteValue isKindOfClass:[NSString class]] &&
                                            attributedClass == [NSUUID class]);
 
