@@ -155,8 +155,10 @@ public protocol SyncDelegate: class {
             debugPrint("Failed syncing changes \(error)")
         }
 
-        self.updateExecuting(false)
-        self.updateFinished(true)
+        DispatchQueue.main.async {
+            self.updateExecuting(false)
+            self.updateFinished(true)
+        }
     }
 
     public override func cancel() {
