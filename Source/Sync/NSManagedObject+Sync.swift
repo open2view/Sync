@@ -132,9 +132,22 @@ extension NSManagedObject {
             let request = NSFetchRequest<NSFetchRequestResult>(entityName: destinationEntityName)
             let fetchedObjects = try? managedObjectContext.fetch(request) as? [NSManagedObject] ?? [NSManagedObject]()
             guard let objects = fetchedObjects else { return }
+
+            var localPrimaryKeyDictionary: [NSEntityDescription: String] = [:]
+
             for safeObject in objects {
-                guard let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey()) else {
-                    debugPrint("\(safeObject.entity.name!) \(safeObject) has a nil value for primary key \(safeObject.entity.sync_localPrimaryKey()).")
+                let localPrimaryKey: String = {
+                  if let key = localPrimaryKeyDictionary[safeObject.entity] {
+                    return key
+                  } else {
+                    let localPrimaryKey = safeObject.entity.sync_localPrimaryKey()
+                    localPrimaryKeyDictionary[safeObject.entity] = localPrimaryKey
+                    return localPrimaryKey
+                  }
+                }()
+
+                guard let currentID = safeObject.value(forKey: localPrimaryKey) else {
+                    debugPrint("\(safeObject.entity.name!) \(safeObject) has a nil value for primary key \(localPrimaryKey).")
                     continue
                 }
 
@@ -177,7 +190,17 @@ extension NSManagedObject {
 
             if relationship.isOrdered {
                 for safeObject in objects {
-                    guard let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey()) else { continue }
+                    let localPrimaryKey: String = {
+                      if let key = localPrimaryKeyDictionary[safeObject.entity] {
+                        return key
+                      } else {
+                        let localPrimaryKey = safeObject.entity.sync_localPrimaryKey()
+                        localPrimaryKeyDictionary[safeObject.entity] = localPrimaryKey
+                        return localPrimaryKey
+                      }
+                    }()
+
+                    guard let currentID = safeObject.value(forKey: localPrimaryKey) else { continue }
 
                     let remoteIndex = remoteItems.index(of: currentID)
                     let relatedObjects = self.mutableOrderedSetValue(forKey: relationship.name)
@@ -238,8 +261,11 @@ extension NSManagedObject {
         guard let destinationEntity = relationship.destinationEntity else { abort() }
         guard let childEntityName = destinationEntity.name else { abort() }
 
+        let localPrimaryKey = destinationEntity.sync_localPrimaryKey()
+        let remotePrimaryKey = destinationEntity.sync_remotePrimaryKey()
+
         if let children = children {
-            let childIDs = (children as NSArray).value(forKey: destinationEntity.sync_remotePrimaryKey())
+            let childIDs = (children as NSArray).value(forKey: remotePrimaryKey)
 
             if childIDs is NSNull {
                 if value(forKey: relationship.name) != nil {
@@ -255,7 +281,7 @@ extension NSManagedObject {
                     } else {
                         localRelationship = self.value(forKey: relationship.name) as? NSSet ?? NSSet()
                     }
-                    let localItems = localRelationship.value(forKey: destinationEntity.sync_localPrimaryKey()) as? NSSet ?? NSSet()
+                    let localItems = localRelationship.value(forKey: localPrimaryKey) as? NSSet ?? NSSet()
 
                     let deletedItems = NSMutableArray(array: localItems.allObjects)
                     let removedRemoteItems = remoteItems as? [Any] ?? [Any]()
@@ -263,11 +289,23 @@ extension NSManagedObject {
 
                     let request = NSFetchRequest<NSFetchRequestResult>(entityName: destinationEntityName)
                     var safeLocalObjects: [NSManagedObject]?
+                    var localPrimaryKeyDictionary: [NSEntityDescription: String] = [:]
 
                     if deletedItems.count > 0 {
                         safeLocalObjects = try context.fetch(request) as? [NSManagedObject] ?? [NSManagedObject]()
+
                         for safeObject in safeLocalObjects! {
-                            let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey())!
+                            let localPrimaryKey: String = {
+                              if let key = localPrimaryKeyDictionary[safeObject.entity] {
+                                return key
+                              } else {
+                                let localPrimaryKey = safeObject.entity.sync_localPrimaryKey()
+                                localPrimaryKeyDictionary[safeObject.entity] = localPrimaryKey
+                                return localPrimaryKey
+                              }
+                            }()
+
+                            let currentID = safeObject.value(forKey: localPrimaryKey)!
                             for deleted in deletedItems {
                                 if (currentID as AnyObject).isEqual(deleted) {
                                     if relationship.isOrdered {
@@ -296,7 +334,17 @@ extension NSManagedObject {
                             objects = try context.fetch(request) as? [NSManagedObject] ?? [NSManagedObject]()
                         }
                         for safeObject in objects {
-                            let currentID = safeObject.value(forKey: safeObject.entity.sync_localPrimaryKey())!
+                            let localPrimaryKey: String = {
+                              if let key = localPrimaryKeyDictionary[safeObject.entity] {
+                                return key
+                              } else {
+                                let localPrimaryKey = safeObject.entity.sync_localPrimaryKey()
+                                localPrimaryKeyDictionary[safeObject.entity] = localPrimaryKey
+                                return localPrimaryKey
+                              }
+                            }()
+
+                            let currentID = safeObject.value(forKey: localPrimaryKey)!
                             let remoteIndex = remoteItems.index(of: currentID)
                             let relatedObjects = self.mutableOrderedSetValue(forKey: relationship.name)
 
