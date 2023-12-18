@@ -1,507 +1,388 @@
 import Foundation
+import Combine
+import OSLog
 import CoreData
 
-@objc public enum DataStackStoreType: Int {
-    case inMemory, sqLite
+private let logger = Logger(subsystem: "Sync", category: "DataStack")
 
-    var type: String {
-        switch self {
-        case .inMemory:
-            return NSInMemoryStoreType
-        case .sqLite:
-            return NSSQLiteStoreType
-        }
+@objc public enum DataStackStoreType: Int {
+  case inMemory, sqLite
+
+  var type: String {
+    switch self {
+    case .inMemory:
+      return NSInMemoryStoreType
+    case .sqLite:
+      return NSSQLiteStoreType
     }
+  }
 }
 
 @objc public class DataStack: NSObject {
-    private var storeType = DataStackStoreType.sqLite
+  private var storeType = DataStackStoreType.sqLite
 
-    private var storeName: String?
+  private var storeName: String?
 
-    private var modelName = ""
+  private var modelName: String
 
-    private var modelBundle = Bundle.main
+  private var modelBundle = Bundle.main
 
-    private var model: NSManagedObjectModel
+  private let backgroundContextName = "DataStack.backgroundContextName"
 
-    private var containerURL = FileManager.sqliteDirectoryURL
+  private let inMemory: Bool
+  private var subscriptions: Set<AnyCancellable> = []
 
-    private let backgroundContextName = "DataStack.backgroundContextName"
+  public init(modelName: String, inMemory: Bool = false) {
+    self.modelName = modelName
+    self.inMemory = inMemory
+    super.init()
+    configureSubscriptions()
+  }
 
-    /**
-     The context for the main queue. Please do not use this to mutate data, use `performInNewBackgroundContext`
-     instead.
-     */
-    @objc public lazy var mainContext: NSManagedObjectContext = {
-        let context = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
-        context.undoManager = nil
-        context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
-        context.persistentStoreCoordinator = self.persistentStoreCoordinator
+  private func configureSubscriptions() {
+    NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
+      .sink { [weak self] notification in
+        logger.debug("Received persistent store remote change notification: \(notification)")
 
-        NotificationCenter.default.addObserver(self, selector: #selector(DataStack.mainContextDidSave(_:)), name: .NSManagedObjectContextDidSave, object: context)
-
-        return context
-    }()
-
-    /**
-     The context for the main queue. Please do not use this to mutate data, use `performBackgroundTask`
-     instead.
-     */
-    @objc public var viewContext: NSManagedObjectContext {
-        return self.mainContext
-    }
-
-    private lazy var writerContext: NSManagedObjectContext = {
-        let context = NSManagedObjectContext(concurrencyType: DataStack.backgroundConcurrencyType())
-        context.undoManager = nil
-        context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
-        context.persistentStoreCoordinator = self.persistentStoreCoordinator
-
-        return context
-    }()
-
-    @objc public private(set) lazy var persistentStoreCoordinator: NSPersistentStoreCoordinator = {
-        let persistentStoreCoordinator = NSPersistentStoreCoordinator(managedObjectModel: self.model)
-        try! persistentStoreCoordinator.addPersistentStore(storeType: self.storeType, bundle: self.modelBundle, modelName: self.modelName, storeName: self.storeName, containerURL: self.containerURL)
-
-        return persistentStoreCoordinator
-    }()
-
-    private lazy var disposablePersistentStoreCoordinator: NSPersistentStoreCoordinator = {
-        let model = NSManagedObjectModel(bundle: self.modelBundle, name: self.modelName)
-        let persistentStoreCoordinator = NSPersistentStoreCoordinator(managedObjectModel: model)
-        try! persistentStoreCoordinator.addPersistentStore(storeType: .inMemory, bundle: self.modelBundle, modelName: self.modelName, storeName: self.storeName, containerURL: self.containerURL)
-
-        return persistentStoreCoordinator
-    }()
-
-    /**
-     Initializes a DataStack using the bundle name as the model name, so if your target is called ModernApp,
-     it will look for a ModernApp.xcdatamodeld.
-     */
-    @objc public override init() {
-        let bundle = Bundle.main
-        if let bundleName = bundle.infoDictionary?["CFBundleName"] as? String {
-            self.modelName = bundleName
+        Task { [weak self] in
+          await self?.fetchPersistentHistory()
         }
-        self.model = NSManagedObjectModel(bundle: self.modelBundle, name: self.modelName)
+      }
+      .store(in: &subscriptions)
+  }
 
-        super.init()
+  // MARK: - Core Data stack
+
+  public private(set) lazy var container: NSPersistentContainer = {
+    guard
+      let dataModelURL = modelBundle.url(forResource: modelName, withExtension: "momd"),
+      let dataModel = NSManagedObjectModel(contentsOf: dataModelURL)
+    else {
+      fatalError("Failed to find data model in the bundle.")
     }
 
-    /**
-     Initializes a DataStack using the provided model name.
-     - parameter modelName: The name of your Core Data model (xcdatamodeld).
-     */
-    @objc public init(modelName: String) {
-        self.modelName = modelName
-        self.model = NSManagedObjectModel(bundle: self.modelBundle, name: self.modelName)
+    let container = NSPersistentContainer(name: modelName, managedObjectModel: dataModel)
 
-        super.init()
+    guard let description = container.persistentStoreDescriptions.first else {
+      fatalError("Failed to retrieve persistent store description.")
     }
 
-    /**
-     Initializes a DataStack using the provided model name, bundle and storeType.
-     - parameter modelName: The name of your Core Data model (xcdatamodeld).
-     - parameter storeType: The store type to be used, you have .InMemory and .SQLite, the first one is memory
-     based and doesn't save to disk, while the second one creates a .sqlite file and stores things there.
-     */
-    @objc public init(modelName: String, storeType: DataStackStoreType) {
-        self.modelName = modelName
-        self.storeType = storeType
-        self.model = NSManagedObjectModel(bundle: self.modelBundle, name: self.modelName)
+    if inMemory {
+      description.url = URL(fileURLWithPath: "/dev/null")
+    } else {
+      guard let appContainer = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).last else {
+        fatalError("File container could not be created.")
+      }
 
-        super.init()
+      let url = appContainer.appendingPathComponent("\(modelName).sqlite")
+
+      if let description = container.persistentStoreDescriptions.first {
+        description.url = url
+        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+      }
     }
 
-    /**
-     Initializes a DataStack using the provided model name, bundle and storeType.
-     - parameter modelName: The name of your Core Data model (xcdatamodeld).
-     - parameter bundle: The bundle where your Core Data model is located, normally your Core Data model is in
-     the main bundle but when using unit tests sometimes your Core Data model could be located where your tests
-     are located.
-     - parameter storeType: The store type to be used, you have .InMemory and .SQLite, the first one is memory
-     based and doesn't save to disk, while the second one creates a .sqlite file and stores things there.
-     */
-    @objc public init(modelName: String, bundle: Bundle, storeType: DataStackStoreType) {
-        self.modelName = modelName
-        self.modelBundle = bundle
-        self.storeType = storeType
-        self.model = NSManagedObjectModel(bundle: self.modelBundle, name: self.modelName)
-
-        super.init()
+    container.loadPersistentStores { storeDescription, error in
+      if let error {
+        // Handle migration by dropping database and recreating the store
+        self.drop()
+      }
     }
 
-    /**
-     Initializes a DataStack using the provided model name, bundle, storeType and store name.
-     - parameter modelName: The name of your Core Data model (xcdatamodeld).
-     - parameter bundle: The bundle where your Core Data model is located, normally your Core Data model is in
-     the main bundle but when using unit tests sometimes your Core Data model could be located where your tests
-     are located.
-     - parameter storeType: The store type to be used, you have .InMemory and .SQLite, the first one is memory
-     based and doesn't save to disk, while the second one creates a .sqlite file and stores things there.
-     - parameter storeName: Normally your file would be named as your model name is named, so if your model
-     name is AwesomeApp then the .sqlite file will be named AwesomeApp.sqlite, this attribute allows your to
-     change that.
-     */
-    @objc public init(modelName: String, bundle: Bundle, storeType: DataStackStoreType, storeName: String) {
-        self.modelName = modelName
-        self.modelBundle = bundle
-        self.storeType = storeType
-        self.storeName = storeName
-        self.model = NSManagedObjectModel(bundle: self.modelBundle, name: self.modelName)
+    container.viewContext.automaticallyMergesChangesFromParent = false
+    container.viewContext.name = "viewContext"
+    container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+    container.viewContext.undoManager = nil
+    container.viewContext.shouldDeleteInaccessibleFaults = true
 
-        super.init()
+    if !inMemory {
+      do {
+        try container.viewContext.setQueryGenerationFrom(.current)
+      } catch {
+        fatalError("Failed to set query generation: \(error)")
+      }
     }
 
-    /**
-     Initializes a DataStack using the provided model name, bundle, storeType and store name.
-     - parameter modelName: The name of your Core Data model (xcdatamodeld).
-     - parameter bundle: The bundle where your Core Data model is located, normally your Core Data model is in
-     the main bundle but when using unit tests sometimes your Core Data model could be located where your tests
-     are located.
-     - parameter storeType: The store type to be used, you have .InMemory and .SQLite, the first one is memory
-     based and doesn't save to disk, while the second one creates a .sqlite file and stores things there.
-     - parameter storeName: Normally your file would be named as your model name is named, so if your model
-     name is AwesomeApp then the .sqlite file will be named AwesomeApp.sqlite, this attribute allows your to
-     change that.
-     - parameter containerURL: The container URL for the sqlite file when a store type of SQLite is used.
-     */
-    @objc public init(modelName: String, bundle: Bundle, storeType: DataStackStoreType, storeName: String, containerURL: URL) {
-        self.modelName = modelName
-        self.modelBundle = bundle
-        self.storeType = storeType
-        self.storeName = storeName
-        self.containerURL = containerURL
-        self.model = NSManagedObjectModel(bundle: self.modelBundle, name: self.modelName)
+    return container
+  }()
 
-        super.init()
+  /// Creates and configures a private queue context.
+  public func newTaskContext() -> NSManagedObjectContext {
+    let taskContext = container.newBackgroundContext()
+    taskContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+    taskContext.undoManager = nil
+    return taskContext
+  }
+
+  // MARK: - History token
+
+  private let tokenManager = PersistentHistoryTokenManager(dataModelName: "DataModel")
+
+  // MARK: - Changes observing
+
+  private func fetchPersistentHistory() async {
+    do {
+      try await fetchPersistentHistoryTransactionsAndChanges()
+    } catch {
+      logger.error("Failed to fetch persistent history: \(error)")
+    }
+  }
+
+  private func fetchPersistentHistoryTransactionsAndChanges() async throws {
+    let taskContext = newTaskContext()
+    taskContext.name = "persistentHistoryContext"
+
+    logger.debug("Starting to fetch persistent history changes from the store")
+
+    let lastToken = await tokenManager.lastToken
+
+    let history = try await taskContext.perform {
+      let changeRequest = NSPersistentHistoryChangeRequest.fetchHistory(after: lastToken)
+      let historyResult = try taskContext.execute(changeRequest) as? NSPersistentHistoryResult
+
+      if
+        let history = historyResult?.result as? [NSPersistentHistoryTransaction],
+        !history.isEmpty
+      {
+        return history
+      } else {
+        logger.debug("No persistent history transactions found")
+        return []
+      }
     }
 
-    /**
-     Initializes a DataStack using the provided model name, bundle and storeType.
-     - parameter model: The model that we'll use to set up your DataStack.
-     - parameter storeType: The store type to be used, you have .InMemory and .SQLite, the first one is memory
-     based and doesn't save to disk, while the second one creates a .sqlite file and stores things there.
-     */
-    @objc public init(model: NSManagedObjectModel, storeType: DataStackStoreType) {
-        self.model = model
-        self.storeType = storeType
+    await mergePersistentHistoryChanges(from: history)
 
-        let bundle = Bundle.main
-        if let bundleName = bundle.infoDictionary?["CFBundleName"] as? String {
-            self.storeName = bundleName
-        }
+    logger.debug("Finished merging history changes")
+  }
 
-        super.init()
+  private func mergePersistentHistoryChanges(from history: [NSPersistentHistoryTransaction]) async {
+    logger.debug("Received \(history.count) persistent history transactions")
+
+    let viewContext = container.viewContext
+    var lastToken: NSPersistentHistoryToken?
+
+    await viewContext.perform {
+      for transaction in history {
+        viewContext.mergeChanges(fromContextDidSave: transaction.objectIDNotification())
+        lastToken = transaction.token
+      }
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self, name: .NSManagedObjectContextWillSave, object: nil)
-        NotificationCenter.default.removeObserver(self, name: .NSManagedObjectContextDidSave, object: nil)
+    if let lastToken {
+      await tokenManager.storeHistoryToken(lastToken)
+    }
+  }
+
+  public var mainContext: NSManagedObjectContext {
+    container.viewContext
+  }
+
+  public var viewContext: NSManagedObjectContext {
+    container.viewContext
+  }
+
+  public func newBackgroundContext() -> NSManagedObjectContext {
+    newTaskContext()
+  }
+
+  /**
+   Returns a background context perfect for data mutability operations.
+   - parameter operation: The block that contains the created background context.
+   */
+  @objc public func performInNewBackgroundContext(_ operation: @escaping (_ backgroundContext: NSManagedObjectContext) -> Void) {
+    let context = newTaskContext()
+    let contextBlock: @convention(block) () -> Void = {
+      operation(context)
+    }
+    let blockObject: AnyObject = unsafeBitCast(contextBlock, to: AnyObject.self)
+    context.perform(DataStack.performSelectorForBackgroundContext(), with: blockObject)
+  }
+
+  /**
+   Returns a background context perfect for data mutability operations.
+   - parameter operation: The block that contains the created background context.
+   */
+  @objc public func performBackgroundTask(operation: @escaping (_ backgroundContext: NSManagedObjectContext) -> Void) {
+    self.performInNewBackgroundContext(operation)
+  }
+
+  public func drop() {
+    container.persistentStoreDescriptions.forEach { storeDescription in
+      if let url = storeDescription.url {
+        let type = NSPersistentStore.StoreType(rawValue: storeDescription.type)
+        try? container.persistentStoreCoordinator.destroyPersistentStore(at: url, type: type)
+      }
     }
 
-    /**
-     Returns a new main context that is detached from saving to disk.
-     */
-    @objc public func newDisposableMainContext() -> NSManagedObjectContext {
-        let context = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
-        context.persistentStoreCoordinator = self.disposablePersistentStoreCoordinator
-        context.undoManager = nil
+    Task { await tokenManager.deleteHistoryToken() }
 
-        NotificationCenter.default.addObserver(self, selector: #selector(DataStack.newDisposableMainContextWillSave(_:)), name: NSNotification.Name.NSManagedObjectContextWillSave, object: context)
-
-        return context
+    container.loadPersistentStores { storeDescription, error in
+      if let error {
+        fatalError("Unresolved error: \(error)")
+      }
     }
+  }
 
-    /**
-     Returns a background context perfect for data mutability operations. Make sure to never use it on the main thread. Use `performBlock` or `performBlockAndWait` to use it.
-     Saving to this context doesn't merge with the main thread. This context is specially useful to run operations that don't block the main thread. To refresh your main thread objects for
-     example when using a NSFetchedResultsController use `try self.fetchedResultsController.performFetch()`.
-     */
-    @objc public func newNonMergingBackgroundContext() -> NSManagedObjectContext {
-        let context = NSManagedObjectContext(concurrencyType: DataStack.backgroundConcurrencyType())
-        context.persistentStoreCoordinator = self.persistentStoreCoordinator
-        context.undoManager = nil
-        context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
+  /// Sends a request to all the persistent stores associated with the receiver.
+  ///
+  /// - Parameters:
+  ///   - request: A fetch, save or delete request.
+  ///   - context: The context against which request should be executed.
+  /// - Returns: An array containing managed objects, managed object IDs, or dictionaries as appropriate for a fetch request; an empty array if request is a save request, or nil if an error occurred.
+  /// - Throws: If an error occurs, upon return contains an NSError object that describes the problem.
+  @objc public func execute(_ request: NSPersistentStoreRequest, with context: NSManagedObjectContext) throws -> Any {
+    return try self.container.persistentStoreCoordinator.execute(request, with: context)
+  }
 
-        return context
-    }
+  private static func backgroundConcurrencyType() -> NSManagedObjectContextConcurrencyType {
+    return TestCheck.isTesting ? .mainQueueConcurrencyType : .privateQueueConcurrencyType
+  }
 
-    /**
-     Returns a background context perfect for data mutability operations. Make sure to never use it on the main thread. Use `performBlock` or `performBlockAndWait` to use it.
-     */
-    @objc public func newBackgroundContext() -> NSManagedObjectContext {
-        let context = NSManagedObjectContext(concurrencyType: DataStack.backgroundConcurrencyType())
-        context.name = backgroundContextName
-        context.persistentStoreCoordinator = self.persistentStoreCoordinator
-        context.undoManager = nil
-        context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
-
-        NotificationCenter.default.addObserver(self, selector: #selector(DataStack.backgroundContextDidSave(_:)), name: .NSManagedObjectContextDidSave, object: context)
-
-        return context
-    }
-
-    /**
-     Returns a background context perfect for data mutability operations.
-     - parameter operation: The block that contains the created background context.
-     */
-    @objc public func performInNewBackgroundContext(_ operation: @escaping (_ backgroundContext: NSManagedObjectContext) -> Void) {
-        let context = self.newBackgroundContext()
-        let contextBlock: @convention(block) () -> Void = {
-            operation(context)
-        }
-        let blockObject: AnyObject = unsafeBitCast(contextBlock, to: AnyObject.self)
-        context.perform(DataStack.performSelectorForBackgroundContext(), with: blockObject)
-    }
-
-    /**
-     Returns a background context perfect for data mutability operations.
-     - parameter operation: The block that contains the created background context.
-     */
-    @objc public func performBackgroundTask(operation: @escaping (_ backgroundContext: NSManagedObjectContext) -> Void) {
-        self.performInNewBackgroundContext(operation)
-    }
-
-    func saveMainThread(completion: ((_ error: NSError?) -> Void)?) {
-        var writerContextError: NSError?
-        let writerContextBlock: @convention(block) () -> Void = {
-            do {
-                try self.writerContext.save()
-                if TestCheck.isTesting {
-                    completion?(nil)
-                }
-            } catch let parentError as NSError {
-                writerContextError = parentError
-            }
-        }
-        let writerContextBlockObject: AnyObject = unsafeBitCast(writerContextBlock, to: AnyObject.self)
-
-        let mainContextBlock: @convention(block) () -> Void = {
-            self.writerContext.perform(DataStack.performSelectorForBackgroundContext(), with: writerContextBlockObject)
-            DispatchQueue.main.async {
-                completion?(writerContextError)
-            }
-        }
-        let mainContextBlockObject: AnyObject = unsafeBitCast(mainContextBlock, to: AnyObject.self)
-        self.mainContext.perform(DataStack.performSelectorForBackgroundContext(), with: mainContextBlockObject)
-    }
-
-    // Drops the database.
-    @objc public func drop(completion: ((_ error: NSError?) -> Void)? = nil) {
-        self.writerContext.performAndWait {
-            self.writerContext.reset()
-
-            self.mainContext.performAndWait {
-                self.mainContext.reset()
-
-                self.persistentStoreCoordinator.performAndWait {
-                    for store in self.persistentStoreCoordinator.persistentStores {
-                        guard let storeURL = store.url else { continue }
-                        try! self.oldDrop(storeURL: storeURL)
-                    }
-
-                    DispatchQueue.main.async {
-                        completion?(nil)
-                    }
-                }
-            }
-        }
-    }
-
-    // Required for iOS 8 Compatibility.
-    func oldDrop(storeURL: URL) throws {
-        let storePath = storeURL.path
-        let sqliteFile = (storePath as NSString).deletingPathExtension
-        let fileManager = FileManager.default
-
-        self.writerContext.reset()
-        self.mainContext.reset()
-
-        let shm = sqliteFile + ".sqlite-shm"
-        if fileManager.fileExists(atPath: shm) {
-            do {
-                try fileManager.removeItem(at: NSURL.fileURL(withPath: shm))
-            } catch let error as NSError {
-                throw NSError(info: "Could not delete persistent store shm", previousError: error)
-            }
-        }
-
-        let wal = sqliteFile + ".sqlite-wal"
-        if fileManager.fileExists(atPath: wal) {
-            do {
-                try fileManager.removeItem(at: NSURL.fileURL(withPath: wal))
-            } catch let error as NSError {
-                throw NSError(info: "Could not delete persistent store wal", previousError: error)
-            }
-        }
-
-        if fileManager.fileExists(atPath: storePath) {
-            do {
-                try fileManager.removeItem(at: storeURL)
-            } catch let error as NSError {
-                throw NSError(info: "Could not delete sqlite file", previousError: error)
-            }
-        }
-    }
-
-    /// Sends a request to all the persistent stores associated with the receiver.
-    ///
-    /// - Parameters:
-    ///   - request: A fetch, save or delete request.
-    ///   - context: The context against which request should be executed.
-    /// - Returns: An array containing managed objects, managed object IDs, or dictionaries as appropriate for a fetch request; an empty array if request is a save request, or nil if an error occurred.
-    /// - Throws: If an error occurs, upon return contains an NSError object that describes the problem.
-    @objc public func execute(_ request: NSPersistentStoreRequest, with context: NSManagedObjectContext) throws -> Any {
-        return try self.persistentStoreCoordinator.execute(request, with: context)
-    }
-
-    // Can't be private, has to be internal in order to be used as a selector.
-    @objc func mainContextDidSave(_ notification: Notification) {
-        self.saveMainThread { error in
-            if let error = error {
-                debugPrint("Failed to save objects in main thread: \(error)")
-            }
-        }
-    }
-
-    // Can't be private, has to be internal in order to be used as a selector.
-    @objc func newDisposableMainContextWillSave(_ notification: Notification) {
-        if let context = notification.object as? NSManagedObjectContext {
-            context.reset()
-        }
-    }
-
-    // Can't be private, has to be internal in order to be used as a selector.
-    @objc func backgroundContextDidSave(_ notification: Notification) throws {
-        let context = notification.object as? NSManagedObjectContext
-        guard context?.name == backgroundContextName else {
-            return
-        }
-
-        if Thread.isMainThread && TestCheck.isTesting == false {
-            throw NSError(info: "Background context saved in the main thread. Use context's `performBlock`", previousError: nil)
-        } else {
-            let contextBlock: @convention(block) () -> Void = {
-                self.mainContext.mergeChanges(fromContextDidSave: notification)
-            }
-            let blockObject: AnyObject = unsafeBitCast(contextBlock, to: AnyObject.self)
-            self.mainContext.perform(DataStack.performSelectorForBackgroundContext(), with: blockObject)
-        }
-    }
-
-    private static func backgroundConcurrencyType() -> NSManagedObjectContextConcurrencyType {
-        return TestCheck.isTesting ? .mainQueueConcurrencyType : .privateQueueConcurrencyType
-    }
-
-    private static func performSelectorForBackgroundContext() -> Selector {
-        return TestCheck.isTesting ? NSSelectorFromString("performBlockAndWait:") : NSSelectorFromString("performBlock:")
-    }
+  private static func performSelectorForBackgroundContext() -> Selector {
+    return TestCheck.isTesting ? NSSelectorFromString("performBlockAndWait:") : NSSelectorFromString("performBlock:")
+  }
 }
 
 extension NSPersistentStoreCoordinator {
-    func addPersistentStore(storeType: DataStackStoreType, bundle: Bundle, modelName: String, storeName: String?, containerURL: URL) throws {
-        let filePath = (storeName ?? modelName) + ".sqlite"
-        switch storeType {
-        case .inMemory:
-            do {
-                try self.addPersistentStore(ofType: NSInMemoryStoreType, configurationName: nil, at: nil, options: nil)
-            } catch let error as NSError {
-                throw NSError(info: "There was an error creating the persistentStoreCoordinator for in memory store", previousError: error)
-            }
+  func addPersistentStore(storeType: DataStackStoreType, bundle: Bundle, modelName: String, storeName: String?, containerURL: URL) throws {
+    let filePath = (storeName ?? modelName) + ".sqlite"
+    switch storeType {
+    case .inMemory:
+      do {
+        try self.addPersistentStore(ofType: NSInMemoryStoreType, configurationName: nil, at: nil, options: nil)
+      } catch let error as NSError {
+        throw NSError(info: "There was an error creating the persistentStoreCoordinator for in memory store", previousError: error)
+      }
 
-            break
-        case .sqLite:
-            let storeURL = containerURL.appendingPathComponent(filePath)
-            let storePath = storeURL.path
+      break
+    case .sqLite:
+      let storeURL = containerURL.appendingPathComponent(filePath)
+      let storePath = storeURL.path
 
-            let shouldPreloadDatabase = !FileManager.default.fileExists(atPath: storePath)
-            if shouldPreloadDatabase {
-                if let preloadedPath = bundle.path(forResource: modelName, ofType: "sqlite") {
-                    let preloadURL = URL(fileURLWithPath: preloadedPath)
+      let shouldPreloadDatabase = !FileManager.default.fileExists(atPath: storePath)
+      if shouldPreloadDatabase {
+        if let preloadedPath = bundle.path(forResource: modelName, ofType: "sqlite") {
+          let preloadURL = URL(fileURLWithPath: preloadedPath)
 
-                    do {
-                        try FileManager.default.copyItem(at: preloadURL, to: storeURL)
-                    } catch let error as NSError {
-                        throw NSError(info: "Oops, could not copy preloaded data", previousError: error)
-                    }
-                }
-            }
-
-            let options = [NSMigratePersistentStoresAutomaticallyOption: true, NSInferMappingModelAutomaticallyOption: true, NSSQLitePragmasOption: ["journal_mode": "DELETE"]] as [AnyHashable : Any]
-            do {
-                try self.addPersistentStore(ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL, options: options)
-            } catch {
-                do {
-                    try FileManager.default.removeItem(atPath: storePath)
-                    do {
-                        try self.addPersistentStore(ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL, options: options)
-                    } catch let addPersistentError as NSError {
-                        throw NSError(info: "There was an error creating the persistentStoreCoordinator", previousError: addPersistentError)
-                    }
-                } catch let removingError as NSError {
-                    throw NSError(info: "There was an error removing the persistentStoreCoordinator", previousError: removingError)
-                }
-            }
-
-            let shouldExcludeSQLiteFromBackup = storeType == .sqLite && TestCheck.isTesting == false
-            if shouldExcludeSQLiteFromBackup {
-                do {
-                    try (storeURL as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
-                } catch let excludingError as NSError {
-                    throw NSError(info: "Excluding SQLite file from backup caused an error", previousError: excludingError)
-                }
-            }
-
-            break
+          do {
+            try FileManager.default.copyItem(at: preloadURL, to: storeURL)
+          } catch let error as NSError {
+            throw NSError(info: "Oops, could not copy preloaded data", previousError: error)
+          }
         }
+      }
+
+      let options = [NSMigratePersistentStoresAutomaticallyOption: true, NSInferMappingModelAutomaticallyOption: true, NSSQLitePragmasOption: ["journal_mode": "DELETE"]] as [AnyHashable : Any]
+      do {
+        try self.addPersistentStore(ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL, options: options)
+      } catch {
+        do {
+          try FileManager.default.removeItem(atPath: storePath)
+          do {
+            try self.addPersistentStore(ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL, options: options)
+          } catch let addPersistentError as NSError {
+            throw NSError(info: "There was an error creating the persistentStoreCoordinator", previousError: addPersistentError)
+          }
+        } catch let removingError as NSError {
+          throw NSError(info: "There was an error removing the persistentStoreCoordinator", previousError: removingError)
+        }
+      }
+
+      let shouldExcludeSQLiteFromBackup = storeType == .sqLite && TestCheck.isTesting == false
+      if shouldExcludeSQLiteFromBackup {
+        do {
+          try (storeURL as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
+        } catch let excludingError as NSError {
+          throw NSError(info: "Excluding SQLite file from backup caused an error", previousError: excludingError)
+        }
+      }
+
+      break
     }
+  }
 }
 
 extension NSManagedObjectModel {
-    convenience init(bundle: Bundle, name: String) {
-        if let momdModelURL = bundle.url(forResource: name, withExtension: "momd") {
-            self.init(contentsOf: momdModelURL)!
-        } else if let momModelURL = bundle.url(forResource: name, withExtension: "mom") {
-            self.init(contentsOf: momModelURL)!
-        } else {
-            self.init()
-        }
+  convenience init(bundle: Bundle, name: String) {
+    if let momdModelURL = bundle.url(forResource: name, withExtension: "momd") {
+      self.init(contentsOf: momdModelURL)!
+    } else if let momModelURL = bundle.url(forResource: name, withExtension: "mom") {
+      self.init(contentsOf: momModelURL)!
+    } else {
+      self.init()
     }
+  }
 }
 
 extension NSError {
-    convenience init(info: String, previousError: NSError?) {
-        if let previousError = previousError {
-            var userInfo = previousError.userInfo
-            if let _ = userInfo[NSLocalizedFailureReasonErrorKey] {
-                userInfo["Additional reason"] = info
-            } else {
-                userInfo[NSLocalizedFailureReasonErrorKey] = info
-            }
+  convenience init(info: String, previousError: NSError?) {
+    if let previousError = previousError {
+      var userInfo = previousError.userInfo
+      if let _ = userInfo[NSLocalizedFailureReasonErrorKey] {
+        userInfo["Additional reason"] = info
+      } else {
+        userInfo[NSLocalizedFailureReasonErrorKey] = info
+      }
 
-            self.init(domain: previousError.domain, code: previousError.code, userInfo: userInfo)
-        } else {
-            var userInfo = [String: String]()
-            userInfo[NSLocalizedDescriptionKey] = info
-            self.init(domain: "com.SyncDB.DataStack", code: 9999, userInfo: userInfo)
-        }
+      self.init(domain: previousError.domain, code: previousError.code, userInfo: userInfo)
+    } else {
+      var userInfo = [String: String]()
+      userInfo[NSLocalizedDescriptionKey] = info
+      self.init(domain: "com.SyncDB.DataStack", code: 9999, userInfo: userInfo)
     }
+  }
 }
 
-extension FileManager {
-    /// The directory URL for the sqlite file.
-    public static var sqliteDirectoryURL: URL {
-        #if os(tvOS)
-        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).last!
-        #else
-        if TestCheck.isTesting {
-            return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).last!
-        } else {
-            return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).last!
-        }
-        #endif
+actor PersistentHistoryTokenManager {
+  public let dataModelName: String
+
+  private let tokenFileURL: URL
+  private(set) var lastToken: NSPersistentHistoryToken?
+
+  init(dataModelName: String) {
+    self.dataModelName = dataModelName
+    self.tokenFileURL = Self.tokenFileURL(for: dataModelName)
+    self.lastToken = Self.loadHistoryToken(for: tokenFileURL)
+  }
+
+  func storeHistoryToken(_ token: NSPersistentHistoryToken) {
+    do {
+      let data = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
+      try data.write(to: tokenFileURL)
+      lastToken = token
+    } catch {
+      logger.error("Storing history token failed: \(error)")
     }
+  }
+
+  func deleteHistoryToken() {
+    do {
+      try FileManager.default.removeItem(at: tokenFileURL)
+      lastToken = nil
+    } catch {
+      logger.error("Deleting history token failed: \(error)")
+    }
+  }
+
+  private static func tokenFileURL(for dataModelName: String) -> URL {
+    let url = NSPersistentContainer.defaultDirectoryURL().appendingPathComponent(dataModelName, isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
+    } catch {
+      logger.error("Creating token file directory failed: \(error)")
+    }
+    return url.appendingPathComponent("token.data", isDirectory: false)
+  }
+
+  private static func loadHistoryToken(for tokenFileURL: URL) -> NSPersistentHistoryToken? {
+    do {
+      let tokenData = try Data(contentsOf: tokenFileURL)
+      return try NSKeyedUnarchiver.unarchivedObject(ofClass: NSPersistentHistoryToken.self, from: tokenData)
+    } catch {
+      logger.error("Loading history token failed: \(error)")
+      return nil
+    }
+  }
 }
