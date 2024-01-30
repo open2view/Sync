@@ -30,25 +30,27 @@ private let logger = Logger(subsystem: "Sync", category: "DataStack")
   private let backgroundContextName = "DataStack.backgroundContextName"
 
   private let inMemory: Bool
-  private var subscriptions: Set<AnyCancellable> = []
+
+  private var nsPersistentStoreRemoteChangeNotificationsProcessingTask: Task<Void, Never>?
+
+  deinit {
+    nsPersistentStoreRemoteChangeNotificationsProcessingTask?.cancel()
+  }
 
   public init(modelName: String, inMemory: Bool = false) {
     self.modelName = modelName
     self.inMemory = inMemory
     super.init()
-    configureSubscriptions()
+    startNSPersistentStoreRemoteChangeNotificationsProcessingTask()
   }
 
-  private func configureSubscriptions() {
-    NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
-      .sink { [weak self] notification in
+  private func startNSPersistentStoreRemoteChangeNotificationsProcessingTask() {
+    nsPersistentStoreRemoteChangeNotificationsProcessingTask = Task { [weak self] in
+      for await notification in NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange) {
         logger.debug("Received persistent store remote change notification: \(notification)")
-
-        Task { [weak self] in
-          await self?.fetchPersistentHistory()
-        }
+        await self?.fetchPersistentHistory()
       }
-      .store(in: &subscriptions)
+    }
   }
 
   // MARK: - Core Data stack
