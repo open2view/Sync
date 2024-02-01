@@ -87,8 +87,21 @@ private let logger = Logger(subsystem: "Sync", category: "DataStack")
 
     container.loadPersistentStores { storeDescription, error in
       if let error {
-        // Handle migration by dropping database and recreating the store
-        self.drop()
+        // Possible migration issue; try dropping database and recreating the store
+        logger.warning("Failed to load persistent stores, will try to recover by recreating the store: \(error)")
+
+        let urls = container.persistentStoreDescriptions.compactMap(\.url)
+        urls.forEach {
+          try? FileManager.default.removeItem(at: $0)
+        }
+
+        Task { await self.tokenManager.deleteHistoryToken() }
+
+        container.loadPersistentStores { storeDescription, error in
+          if let error {
+            fatalError("Failed to load persistent stores: \(error)")
+          }
+        }
       }
     }
 
