@@ -45,8 +45,8 @@ private let logger = Logger(subsystem: "Sync", category: "DataStack")
   }
 
   private func startNSPersistentStoreRemoteChangeNotificationsProcessingTask() {
-    nsPersistentStoreRemoteChangeNotificationsProcessingTask = Task { [weak self] in
-      for await notification in NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange) {
+    nsPersistentStoreRemoteChangeNotificationsProcessingTask = Task { [weak self, container] in
+      for await notification in NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange, object: container.persistentStoreCoordinator) {
         logger.debug("Received persistent store remote change notification: \(notification)")
         await self?.fetchPersistentHistory()
       }
