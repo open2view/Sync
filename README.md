@@ -1,3 +1,11 @@
+**Notice: Sync was supported from it's creation back in 2014 until March 2021**
+
+Moving forward I won't be able to support this project since I'm no longer active in making iOS apps with Core Data. I'm leaving this repository as a historical reference of what happened during this time. Sync had in total 130 releases with almost 30 contributors. If you still support this project I encourage you to fork it and continue the development. I don't feel comfortable with passing this project to another developer due to the fact that I want to have some involvement in all the projects that live under my account. 7 years was a good run, thank you everyone for using this project and thank you to everyone that has contributed to it. Best of luck in your careers and in what this constantly evolving tech world has for all of us. 
+
+Initial releases: https://github.com/3lvis/Sync/releases?after=0.4.1
+
+--------------------------------------------------------------------
+
 ![Sync](https://raw.githubusercontent.com/3lvis/Sync/master/Images/logo-v3.png)
 
 **Sync** eases your everyday job of parsing a JSON response and syncing it with Core Data. **Sync** is a lightweight Swift library that uses a convention-over-configuration paradigm to facilitate your workflow.
@@ -423,8 +431,9 @@ github "3lvis/Sync" ~> 6.0
 
 ## Backers
 
-Love Sync? Consider supporting further development and support by becoming a patron:
-👉  https://www.patreon.com/3lvis
+Finding Sync helpful? Consider supporting further development and support by becoming a sponsor:
+👉  https://github.com/sponsors/3lvis
+
 
 ## License
 
